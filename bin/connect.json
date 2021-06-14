@@ -1,0 +1,5 @@
+{"id":1,"method":"mining.subscribe","params":["PROJECT_NAME_VERSION","EthereumStratum/1.0.0"]}
+{"id":2,"method":"mining.extranonce.subscribe","params":[]}
+{"id":2,"method":"mining.authorize","params":["341T2ew7f3aZafjfmhQWRhJ3VaA3pcHCCL","X"]}
+{"id":2,"method":"mining.authorize","params":["341T2ew7f3aZafjfmhQWRhJ3VaA3pcHCCL","X"]}
+

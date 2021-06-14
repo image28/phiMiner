@@ -1,0 +1,4 @@
+INPUT="$1"
+OUTPUT="`echo $INPUT | sed -e s/"\.c"/"\.h"/`"
+
+cat $INPUT | grep -v ";" |grep -v main | grep -Ei "(void |int )[A-Z_ ]*\((|.*)\)" | tr '\n' ";" > $OUTPUT
