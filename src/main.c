@@ -80,7 +80,7 @@ int worker(int argc, char *argv[])
 	uint16 _Cache;
 	uint16 _DAG0;
 	uint16 _DAG1;
-	uint64_t light_size;
+	//uint64_t light_size;
 	
 	int count=0;
 	char temp;
@@ -95,9 +95,7 @@ int worker(int argc, char *argv[])
 	const size_t chunk = workItems/clLocalSize;
 	char nonce_text[7];
 	struct SearchResults results;
-	char header_hash[1024];
-	char prev_seed_hash[1024];
-	char seed_hash[1024];
+	char header_hash[256];
 	char jobid[1024];
 	char id[64];
 	uint8_t seedlen=17;
@@ -110,10 +108,17 @@ int worker(int argc, char *argv[])
 	char args[8][1024];
 	uint8_t first=1;
 	double tempTarget;
-	char jobString;
+	char jobString[1024];
 	char uniqueId[33];
-	int fred=0;
-
+	int fred=1;
+	uint8_t e,l;
+    uint64_t epoch=411;
+	char buffer[MTU];
+	uint32_t light_size=cache_sizes[epoch];
+	light_size=(light_size/8)/256*256+256;
+	char prev_seed_hash[light_size];
+	char seed_hash[light_size];
+	
 	cl_context context;
 	cl_device_id devices[255];
 	cl_device_id device;
@@ -126,59 +131,68 @@ int worker(int argc, char *argv[])
 	
 	cl_kernel kernels[2];
    	cl_mem m_searchBuffer,m_header,m_light,m_dag;
-   	uint32_t s_light;
+   	size_t s_light;
 #ifdef PROFILE
 	cl_event profileEvent;
 #endif
 
     //Initialization
-    uint8_t e,l;
-    uint64_t epoch=411;
-	char buffer[MTU];
+ 
 	
-    init_opencl(&context, &commandQueue, &devices[0], &device, err);
-    load_kernels(&context, &commandQueue, &device, &kernels[0], err);
+    init_opencl(&context, &commandQueue, &devices[0], &device, &err[0]);
+    load_kernels(&context, &commandQueue, &device, &kernels[0], &err[0]);
     
-	// use netcat to get and submit work untill
-	// I can get sockets working with raw packets
-	// then switch bellow string split lines to
-	// grab data from packets.
-	// set the buffersize to the systems mtu
-	// may improve latency in getting work to the opencl
-	// code
-	fd=open(".workpipe",O_APPEND);
+
+	fd=open(".workpipe",O_RDONLY);
 
 	get_buffer(fd, &buffer[0]);
+	
 	check_string(buffer,&uniqueId[0],'"','"',48,81); // uniqueId
-	check_string(buffer,&uniqueId[0],'"','"',108,105); // nonce
-	check_double_not(buffer,&tempTarget,'[',']',53,62,53,62); // target diff
-
+	printf("%s\n",uniqueId);
+	check_string(buffer,&uniqueId[0],'"','"',108,115); // nonce
+	printf("%s\n",uniqueId);
 	temp='\0';
 	count=0;
 	buf[0]='\0';
+	header_hash[0]='\0';
+	
+	
+	
+	printf("Starting\n");
 	while(1)
 	{
 		get_buffer(fd, &buffer[0]);
-
-		check_string_not(buffer,&jobString,'"','"',46,63,46,63); // jobid
-		check_string_not(buffer,&seed_hash[0],'"','"',65,130,65,130);
+		check_double(buffer,&tempTarget,'[',']',53,62); // target diff
+//{"id":null,"method":"mining.set_difficulty","params":[0.198312]}
+//{"id":null,"method":"mining.notify","params":["000000005ba1b0ee","7ce033f6f13675a293f3cca4ec0c8481273030abd1d5a84b5e06dc2045562378","754ef62202fb4cb4a20dbf97d84d1389f025fd1ecb72ad97cf914bfe7220ef49",true]}
+		
+		
+		check_string_not(buffer,&jobString,'"','"',46,63,65,64); // jobid
+		
+		check_string_not(buffer,&seed_hash[0],'"','"',65,130,65,64);
+		
 		if (prev_seed_hash[0]='\0')
 			strncpy(prev_seed_hash,seed_hash,65);
-
+		
 		//check_epoch();
-		check_string_not(buffer,&header_hash[0],'"','"',132,197,132,197); // hash header
-
-		if ( ! fred ) //( havejob ) &&
+		check_string_not(buffer,&header_hash[0],'"','"',132,197,65,64); // hash header
+//printf("dag: %s %s %s %f\n", jobString, seed_hash, header_hash,tempTarget);
+		if ( header_hash[0] != '\0' ) 
 		{
-			//hash();
-		}else{
-			check_double_not(buffer,&tempTarget,'[',']',53,62,52,62); // target diff
-			if ( fred )	// Check if it the workloops first run
+			if( ! fred ) 
 			{
-				//cl_kernel *m_dagKernel, uint16_t epoch, cl_context context, cl_command_queue commandQueue,struct SearchResults *results ,cl_mem *m_searchBuffer, cl_mem *m_header,char *header_hash, char *seed_hash, cl_mem *m_light,cl_mem *m_dag,uint32_t *s_light,cl_int *err
-				setup_dag_kernel(&kernels[0], epoch, context, commandQueue, &results, &m_searchBuffer, &m_header, &header_hash, &seed_hash, &m_light, &m_dag, &s_light, &err);
-				// (cl_kernel *m_dagKernel,cl_command_queue commandQueue, struct SearchResults *results ,cl_mem *m_searchBuffer, cl_mem *m_light, cl_mem *m_dag, cl_mem *s_light, cl_int *err)
-				run_dag_kernel(&kernels[0], commandQueue, &results, &m_searchBuffer,  &m_light, &m_dag, &s_light, &err);
+				//hash();
+			}else{
+				check_double(buffer,&tempTarget,'[',']',53,62); // target diff
+				if ( fred )	// Check if it the workloops first run
+				{
+					printf("dag: %s %s \n", jobString, seed_hash);
+					//cl_kernel *m_dagKernel, uint16_t epoch, cl_context context, cl_command_queue commandQueue,struct SearchResults *results ,cl_mem *m_searchBuffer, cl_mem *m_header,char *header_hash, char *seed_hash, cl_mem *m_light,cl_mem *m_dag,uint32_t *s_light,cl_int *err
+					setup_dag_kernel(&kernels[0], epoch, &context, &commandQueue, &results, &m_searchBuffer, &m_header, &header_hash[0], &seed_hash[0], &m_light, &m_dag, &s_light, &err[0]);
+					// (cl_kernel *m_dagKernel,cl_command_queue commandQueue, struct SearchResults *results ,cl_mem *m_searchBuffer, cl_mem *m_light, cl_mem *m_dag, cl_mem *s_light, cl_int *err)
+					run_dag_kernel(&kernels[0], &commandQueue, &results, &m_searchBuffer,  &m_light, &m_dag, &s_light, &err[0]);
+					fred=0;
+				}
 			}
 		}
 
@@ -189,6 +203,7 @@ int worker(int argc, char *argv[])
 
 	close(fd);
 	//free(result);
+	
 	return(0);
 }
 
@@ -320,16 +335,15 @@ void get_buffer(int fd, char *buf)
 {
 	int count=0;
 	char temp='\0';
+	*(buf+0)='\0';
 	do
 	{
-		count=0;
-		*(buf+0)='\0';
+		
 		temp='\0';
-
 		read(fd, &temp, 1);
 		if ( temp != '\0' )
 		{
-			
+			printf("%c",temp);
 			*(buf+count)=temp;
 			count++;
 			*(buf+count)='\0';
@@ -352,6 +366,7 @@ void check_string(char buf[MTU], char *result, char start, char end, int start_p
 	name.end=&buf[end_pos];
 	int length=end_pos-start_pos+1;
 
+	printf("%c %c\n",*(name.start),*(name.end));
 	if ( ( *(name.start) == start ) && ( *(name.end) == end ) )
 	{
 		name.start=&buf[start_pos+1];
@@ -375,7 +390,7 @@ void check_double(char buf[MTU], double *result, char start, char end, int start
 	name.start=&buf[start_pos];
 	name.end=&buf[end_pos];
 	int length=end_pos-start_pos+1;
-
+	printf("%c %c\n",*(name.start),*(name.end));
 	if ( ( *(name.start) == start ) && ( *(name.end) == end ) )
 	{
 		name.start=&buf[start_pos+1];
@@ -396,54 +411,63 @@ void check_epoch()
 }*/
 
 
-void setup_dag_kernel(cl_kernel *m_dagKernel, uint16_t epoch, cl_context context, cl_command_queue commandQueue,struct SearchResults *results , cl_mem *m_searchBuffer, cl_mem *m_header, char *header_hash, char *seed_hash, cl_mem *m_light, cl_mem *m_dag,uint32_t *s_light,cl_int *err)
+void setup_dag_kernel(cl_kernel *m_dagKernel, uint16_t epoch, cl_context *context, cl_command_queue *commandQueue,struct SearchResults *results , cl_mem *m_searchBuffer, cl_mem *m_header, char *header_hash, char *seed_hash, cl_mem *m_light, cl_mem *m_dag, size_t *s_light,cl_int *err)
 {
 	int errorCount=0;
 	uint32_t light_size=cache_sizes[epoch];
-	uint32_t dag_size=((dag_sizes[epoch]/32)*32)+32;
-	uint16_t workItems=WORKSIZE;
-	light_size=((light_size/32)*32)+32;
+	uint64_t dag_size=(((dag_sizes[epoch]/8)/256)*256)+256;
+	size_t workItems=WORKSIZE;
+	//light_size=((light_size/32)*32)+32;
+	light_size=(light_size/64);
 	*(s_light)=light_size/64;
-	uint8_t chunk=64;
-	uint8_t start=0;
+	size_t chunk=256;
+	uint64_t start=0;
 	
 	// Search Buffer
-	m_searchBuffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(struct SearchResults), &results, *(err+errorCount+1));
-	*(err+errorCount+1)=clEnqueueWriteBuffer(commandQueue, *(m_searchBuffer), CL_FALSE, 0, sizeof(zerox3), zerox3,0, NULL,NULL);
-	m_header = clCreateBuffer(context, CL_MEM_READ_ONLY, 32, NULL, *(err+errorCount+2)); //|CL_MEM_ALLOC_HOST_PTR
-	*(err+errorCount+3)=clEnqueueWriteBuffer(commandQueue, *(m_header), CL_TRUE, 0, 32, &header_hash, 0, NULL, NULL);
-	m_light = clCreateBuffer(context, CL_MEM_READ_ONLY, light_size, NULL, *(err+errorCount+4));
-	*(err+errorCount+5)=clEnqueueWriteBuffer(commandQueue, *(m_light), CL_TRUE, 0, *(s_light), &seed_hash, 0, NULL, NULL);
-	m_dag = clCreateBuffer(context, CL_MEM_READ_ONLY, dag_size, NULL,*(err+errorCount+6));
-	errorCount=errorCount+6;
-
-	for (start = 0; start <= workItems - chunk; start += chunk) {
+	*(m_searchBuffer) = clCreateBuffer(*(context), CL_MEM_READ_WRITE|CL_MEM_COPY_HOST_PTR, sizeof(struct SearchResults), results, err);
+	*(err+1)=clEnqueueWriteBuffer(*(commandQueue), *(m_searchBuffer), CL_FALSE, 0, sizeof(zerox3), &zerox3,0, NULL,NULL);
+	
+	*(m_header) = clCreateBuffer(*(context), CL_MEM_READ_ONLY|CL_MEM_COPY_HOST_PTR, 32, header_hash, err+2); //|CL_MEM_ALLOC_HOST_PTR
+	*(err+3)=clEnqueueWriteBuffer(*(commandQueue), *(m_header), CL_TRUE, 0, 32, header_hash, 0, NULL, NULL);
+	
+	*(m_light) = clCreateBuffer(*(context), CL_MEM_READ_WRITE|CL_MEM_COPY_HOST_PTR, light_size, seed_hash, err+4);
+	*(err+5)=clEnqueueWriteBuffer(*(commandQueue), *(m_light), CL_TRUE, 0, light_size, seed_hash, 0, NULL, NULL);
+	
+	*(m_dag) = clCreateBuffer(*(context), CL_MEM_READ_WRITE, dag_size, NULL,err+6);
+	errorCount=errorCount+7;
+	print_errors("Build dag kernel\0",errorCount,err);
+	errorCount=0;
+	
+	//for (start = 0; start <= workItems - chunk; start = start + chunk) {
+	while ( start < dag_size-chunk )
+	{
 		const size_t offset=start;
-		*(err+errorCount)=clSetKernelArg(*(m_dagKernel),0, 4, &start);
-		*(err+errorCount+1)=clEnqueueNDRangeKernel(commandQueue, *(m_dagKernel), 1, &offset, &workItems, &chunk,0,NULL,NULL);
-		*(err+errorCount+2)=clFlush(commandQueue);
-		*(err+errorCount+3)=clFinish(commandQueue);
-		errorCount=errorCount+4;
+		*(err+errorCount)=clSetKernelArg(*(m_dagKernel),0, 8, &start);
+		*(err+errorCount+1)=clEnqueueNDRangeKernel(*(commandQueue), *(m_dagKernel), CL_TRUE, &offset,&dag_size,&chunk,0,NULL,NULL);
+		*(err+errorCount+2)=clFlush(*(commandQueue));
+		*(err+errorCount+2)=clFinish(*(commandQueue));
+		errorCount=errorCount+3;
+		start=start+chunk;
 	}
 
-	if (start < workItems) {
-		const size_t offset=workItems - start;
-		*(err+errorCount)=clSetKernelArg(*(m_dagKernel),0, 4, &start);
-		*(err+errorCount+1)=clEnqueueNDRangeKernel(commandQueue, *(m_dagKernel), 1, &offset, &workItems, &chunk, 0, NULL,NULL);
-		*(err+errorCount+2)=clFinish(commandQueue);
+	if (start < dag_size) {
+		const size_t offset=dag_size-chunk;
+		*(err+errorCount)=clSetKernelArg(*(m_dagKernel),0, 8, &start);
+		*(err+errorCount+1)=clEnqueueNDRangeKernel(*(commandQueue), *(m_dagKernel), CL_TRUE, &offset,&dag_size,&chunk,0,NULL,NULL);
+		*(err+errorCount+2)=clFinish(*(commandQueue));
 	}
 	print_errors("Build dag kernel\0",errorCount+3,err);
 }
 
-void run_dag_kernel(cl_kernel *m_dagKernel,cl_command_queue commandQueue, struct SearchResults *results ,cl_mem *m_searchBuffer, cl_mem *m_light, cl_mem *m_dag, cl_mem *s_light, cl_int *err)
+void run_dag_kernel(cl_kernel *m_dagKernel,cl_command_queue *commandQueue, struct SearchResults *results ,cl_mem *m_searchBuffer, cl_mem *m_light, cl_mem *m_dag, size_t *s_light, cl_int *err)
 {
 	int errorCount=0;
-	*(err+errorCount)=clSetKernelArg(*(m_dagKernel),0, 8, *(m_light));
-	*(err+errorCount+1)=clSetKernelArg(*(m_dagKernel),1, 8, *(m_dag));
-	*(err+errorCount+2)=clSetKernelArg(*(m_dagKernel),2, 8, NULL);
-	*(err+errorCount+3)=clSetKernelArg(*(m_dagKernel),3, 4, *(s_light));
-	*(err+errorCount)=clFinish(commandQueue);
-	print_errors("Run dag kernel\0",4,err);
+	*(err+errorCount)=clSetKernelArg(*(m_dagKernel),1, sizeof(cl_mem), *(m_light));
+	*(err+errorCount+1)=clSetKernelArg(*(m_dagKernel),2, sizeof(cl_mem), *(m_dag));
+	*(err+errorCount+2)=clSetKernelArg(*(m_dagKernel),3, sizeof(cl_mem), NULL);
+	*(err+errorCount+3)=clSetKernelArg(*(m_dagKernel),4, sizeof(cl_mem), &s_light);
+	*(err+errorCount+4)=clFinish(*(commandQueue));
+	print_errors("Run dag kernel\0",5,err);
 	
 }
 /*
